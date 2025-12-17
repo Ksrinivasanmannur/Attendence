@@ -1,0 +1,2 @@
+it is manpower attendance entry web application,
+it allow to manpower as well as output also entry
