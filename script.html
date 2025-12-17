@@ -1,0 +1,214 @@
+<!-- ---------- script.html ---------- -->
+<script>
+  // get logo image
+  google.script.run.withSuccessHandler(function(base64Image){
+    document.getElementById('logo').src = base64Image;
+  }).getLogoAsBase64();
+
+  // local master data
+  let master = [];
+
+  // initialize
+  document.addEventListener("DOMContentLoaded", () => {
+    // set today's date
+    document.getElementById("date").valueAsDate = new Date();
+
+    // get master data then init dropdowns
+    google.script.run.withSuccessHandler(data => {
+      master = data || [];
+      initDropdowns();
+    }).getMasterData();
+
+    // detect shift and set hidden field
+    google.script.run.withSuccessHandler(shiftVal => {
+      document.getElementById("shift").value = shiftVal || "";
+    }).detectShift();
+  });
+
+  function initDropdowns() {
+    // populate supervisor datalist (searchable)
+    const supSet = [...new Set(master.map(r => r[7]).filter(x => x))]; // assuming supervisor at col index 7 (original used r[7])
+    const supList = document.getElementById("supervisorList");
+    supList.innerHTML = "";
+    supSet.forEach(s => {
+      const opt = document.createElement("option");
+      opt.value = s;
+      supList.appendChild(opt);
+    });
+
+    // populate unit select (assumes unit stored in column index 0)
+    const units = [...new Set(master.map(r => r[0]).filter(x => x))];
+    fillDropdown("unit", units);
+
+    // clear cell and table area
+    fillDropdown("cell", []);
+    document.getElementById("tableArea").innerHTML = "";
+
+    // listeners
+    document.getElementById("unit").addEventListener("change", onUnitChange);
+    document.getElementById("cell").addEventListener("change", onCellChange);
+  }
+
+  function fillDropdown(id, values) {
+    const sel = document.getElementById(id);
+    sel.innerHTML = `<option value="">Select</option>`;
+    values.forEach(v => {
+      const o = document.createElement("option");
+      o.value = v;
+      o.textContent = v;
+      sel.appendChild(o);
+    });
+  }
+
+  function onUnitChange() {
+    const selectedUnit = document.getElementById("unit").value;
+    // cell assumed to be at column index 1 in master rows
+    const cells = master.filter(r => r[0] === selectedUnit).map(r => r[1]);
+    fillDropdown("cell", [...new Set(cells)]);
+    document.getElementById("tableArea").innerHTML = "";
+  }
+
+  function onCellChange() {
+    // When cell changes, automatically load items
+    const u = document.getElementById("unit").value;
+    const c = document.getElementById("cell").value;
+    if (!u || !c) {
+      document.getElementById("tableArea").innerHTML = "";
+      return;
+    }
+    loadItems(u, c);
+  }
+
+  function lockDropdowns() {
+    ["date", "supervisor", "unit", "cell"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) { el.disabled = true; el.classList.add("disabled-box"); }
+    });
+  }
+
+  function unlockDropdowns() {
+    ["date", "supervisor", "unit", "cell"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) { el.disabled = false; el.classList.remove("disabled-box"); }
+    });
+  }
+
+  function loadItems(unit, cell) {
+    // find matching items from master
+    const items = master.filter(r => r[0] === unit && r[1] === cell);
+
+    const tableArea = document.getElementById("tableArea");
+    if (!items || items.length === 0) {
+      tableArea.innerHTML = "<p>No Records Found</p>";
+      return;
+    }
+
+    // lock initial fields to prevent mid-input changes
+    lockDropdowns();
+
+    // build table
+    let html = `<table>
+      <tr>
+        <th>Unit</th>
+        <th>Cell</th>
+        <th>Dept</th>
+        <th>Plan</th>
+        <th>Actual</th>
+        <th>Gap</th>
+        <th>Remarks</th>
+      </tr>`;
+
+    items.forEach((r, i) => {
+      const dept = r[2] || "";
+      html += `<tr>
+        <td>${escapeHtml(r[0]||"")}</td>
+        <td>${escapeHtml(r[1]||"")}</td>
+        <td>${escapeHtml(dept)}</td>
+        <td><input class="small-input" id="p${i}" oninput="calc(${i})" /></td>
+        <td><input class="small-input" id="a${i}" oninput="calc(${i})" /></td>
+        <td id="g${i}">0</td>
+        <td><input class="small-input" id="r${i}" /></td>
+      </tr>`;
+    });
+
+    html += `</table>
+      <button class="btn save-btn" onclick="save(${items.length})">Save</button>`;
+
+    tableArea.innerHTML = html;
+    // expose calc & save as global functions (they're declared below)
+  }
+
+  function calc(i) {
+    const p = Number(document.getElementById("p" + i).value || 0);
+    const a = Number(document.getElementById("a" + i).value || 0);
+    const gEl = document.getElementById("g" + i);
+    if (gEl) gEl.innerText = (p - a);
+  }
+
+  function save(count) {
+    // gather common fields
+    const d = document.getElementById("date").value || "";
+    const sh = document.getElementById("shift").value || ""; // auto-detected
+    const sup = document.getElementById("supervisor").value || "";
+    const u = document.getElementById("unit").value || "";
+    const c = document.getElementById("cell").value || "";
+
+    // build rows from visible table
+    const filtered = master.filter(r => r[0] === u && r[1] === c);
+
+    let rows = [];
+    for (let i = 0; i < count; i++) {
+      const plan = document.getElementById("p" + i).value || "";
+      const act = document.getElementById("a" + i).value || "";
+      const dept = (filtered[i] && filtered[i][2]) ? filtered[i][2] : "";
+      const gap = Number(plan || 0) - Number(act || 0);
+      const remarks = document.getElementById("r" + i).value || "";
+
+      // reference format preserved: date-shift-unit-cell-dept
+      const ref = `${d}-${sh}-${u}-${c}-${dept}`;
+
+      rows.push([d, sh, sup, u, c, dept, plan, act, gap, remarks, ref]);
+    }
+
+    // silent save - no alerts or confirmations. After server reply we clear.
+    google.script.run.withSuccessHandler(result => {
+      // regardless of result (OK or DUPLICATE) we clear the UI as requested
+      resetForm();
+    }).saveToDB(rows);
+  }
+
+  function resetForm() {
+    document.getElementById("date").valueAsDate = new Date();
+    // re-detect shift for new submission
+    google.script.run.withSuccessHandler(shiftVal => {
+      document.getElementById("shift").value = shiftVal || "";
+    }).detectShift();
+
+    document.getElementById("supervisor").value = "";
+    document.getElementById("unit").value = "";
+    document.getElementById("cell").value = "";
+    document.getElementById("tableArea").innerHTML = "";
+    unlockDropdowns();
+  }
+
+  // small utility
+  function escapeHtml(text) {
+    if (!text) return "";
+    return text.toString().replace(/[&<>"'`=\/]/g, function(s) {
+      return {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+        '/': '&#x2F;',
+        '`': '&#x60;',
+        '=': '&#x3D;'
+      }[s];
+    });
+  }
+
+  // expose calc/save on window so inline attributes work
+  window.calc = calc;
+  window.save = save;
+</script>
