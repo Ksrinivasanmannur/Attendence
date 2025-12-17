@@ -96,15 +96,7 @@ function sendReportAndMoveDataApu(){
     <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
   `;
 
-  mailValues.forEach((row, rIndex) => {
-    htmlBody += "<tr>";
-    row.forEach(cell => {
-      htmlBody += rIndex === 0
-        ? `<th style="background:#f2f2f2;">${cell}</th>`
-        : `<td>${cell}</td>`;
-    });
-    htmlBody += "</tr>";
-  });
+  
 
   htmlBody += `
     </table>
@@ -175,15 +167,7 @@ function sendReportAndMoveDataService() {
     <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
   `;
 
-  mailValues.forEach((row, rIndex) => {
-    htmlBody += "<tr>";
-    row.forEach(cell => {
-      htmlBody += rIndex === 0
-        ? `<th style="background:#f2f2f2;">${cell}</th>`
-        : `<td>${cell}</td>`;
-    });
-    htmlBody += "</tr>";
-  });
+  
 
   htmlBody += `
     </table>
